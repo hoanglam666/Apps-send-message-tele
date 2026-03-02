@@ -193,15 +193,26 @@ function importGroupDataFromTelegram_() {
     }
 
     const entries = parseHangDuEntries_(message.text);
+    const senderName = getSenderName_(message.from);
+    const sentAt = getMessageTime_(message.date);
+    const groupId = String(message.chat.id || "");
+
     entries.forEach((entry) => {
-      rows.push([entry.serial, "", entry.groupCode]);
+      rows.push([
+        message.text,
+        entry.first6,
+        entry.last2,
+        groupId,
+        senderName,
+        sentAt
+      ]);
     });
   });
 
   if (rows.length > 0) {
     const sheet = getOrCreateDataSheet_();
     const startRow = sheet.getLastRow() + 1;
-    sheet.getRange(startRow, 1, rows.length, 3).setValues(rows);
+    sheet.getRange(startRow, 1, rows.length, 6).setValues(rows);
   }
 
   scriptProps.setProperty(TELEGRAM.LAST_UPDATE_KEY, String(maxUpdateId));
@@ -218,8 +229,8 @@ function parseHangDuEntries_(text) {
 
   while ((match = regex.exec(text)) !== null) {
     entries.push({
-      serial: match[1],
-      groupCode: match[2].padStart(2, "0")
+      first6: match[1],
+      last2: match[2].padStart(2, "0")
     });
   }
 
@@ -232,10 +243,28 @@ function getOrCreateDataSheet_() {
 
   if (!sheet) {
     sheet = spreadsheet.insertSheet(TELEGRAM.DATA_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 3).setValues([["Data_6_So", "Message", "Ma_Group"]]);
+    sheet.getRange(1, 1, 1, 6).setValues([["Raw_Message", "First_6", "Last_2", "Group_ID", "Sender_Name", "Sent_Time"]]);
   }
 
   return sheet;
+}
+
+
+function getSenderName_(from) {
+  if (!from) {
+    return "";
+  }
+
+  const fullName = [from.first_name || "", from.last_name || ""].join(" ").trim();
+  return fullName || from.username || String(from.id || "");
+}
+
+function getMessageTime_(unixSeconds) {
+  if (!unixSeconds) {
+    return "";
+  }
+
+  return new Date(Number(unixSeconds) * 1000);
 }
 
 function isValidPendingRow_(rowData, status) {
