@@ -156,6 +156,18 @@ function sendAllPendingNow() {
 }
 
 function fetchGroupDataFromTelegram() {
+  return importGroupDataFromTelegram_();
+}
+
+function fetchGroupData() {
+  return importGroupDataFromTelegram_();
+}
+
+function fetchGroupDataFromTelegramButton() {
+  return importGroupDataFromTelegram_();
+}
+
+function importGroupDataFromTelegram_() {
   const scriptProps = PropertiesService.getScriptProperties();
   const lastUpdateId = Number(scriptProps.getProperty(TELEGRAM.LAST_UPDATE_KEY) || 0);
   const apiResult = telegramApiGet_("getUpdates", { offset: lastUpdateId + 1, timeout: 0 });
