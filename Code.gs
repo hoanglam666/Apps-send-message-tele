@@ -8,11 +8,18 @@ const COL = {
   DELAY_MINUTES: 5
 };
 
+const TELEGRAM = {
+  LAST_UPDATE_KEY: "TELEGRAM_LAST_UPDATE_ID",
+  DATA_SHEET_NAME: "data"
+};
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Telegram Alerts")
     .addItem("Gửi ngay dòng đang chọn", "sendSelectedPendingNow")
     .addItem("Gửi ngay tất cả PENDING", "sendAllPendingNow")
+    .addSeparator()
+    .addItem("Đọc dữ liệu Hàng dư từ group", "fetchGroupDataFromTelegram")
     .addToUi();
 }
 
@@ -39,6 +46,27 @@ function getBotToken_() {
   }
 
   return token;
+}
+
+function telegramApiGet_(method, queryParams) {
+  const token = getBotToken_();
+  const query = queryParams
+    ? "?" + Object.keys(queryParams).map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(queryParams[key])}`).join("&")
+    : "";
+  const url = `https://api.telegram.org/bot${token}/${method}${query}`;
+
+  const response = UrlFetchApp.fetch(url, {
+    method: "get",
+    muteHttpExceptions: true
+  });
+  const statusCode = response.getResponseCode();
+  const content = response.getContentText();
+
+  if (statusCode !== 200) {
+    throw new Error(`Telegram API lỗi ${statusCode}: ${content}`);
+  }
+
+  return JSON.parse(content);
 }
 
 function sendTelegram(chatId, message) {
@@ -125,6 +153,77 @@ function sendAllPendingNow() {
       sendRow_(sheet, rowIndex, data[i]);
     }
   }
+}
+
+function fetchGroupDataFromTelegram() {
+  const scriptProps = PropertiesService.getScriptProperties();
+  const lastUpdateId = Number(scriptProps.getProperty(TELEGRAM.LAST_UPDATE_KEY) || 0);
+  const apiResult = telegramApiGet_("getUpdates", { offset: lastUpdateId + 1, timeout: 0 });
+
+  if (!apiResult.ok || !Array.isArray(apiResult.result)) {
+    throw new Error(`Không lấy được updates: ${JSON.stringify(apiResult)}`);
+  }
+
+  const rows = [];
+  let maxUpdateId = lastUpdateId;
+
+  apiResult.result.forEach((update) => {
+    maxUpdateId = Math.max(maxUpdateId, Number(update.update_id || 0));
+    const message = update.message;
+
+    if (!message || !message.chat || !message.text) {
+      return;
+    }
+
+    const chatType = String(message.chat.type || "").toLowerCase();
+    if (chatType !== "group" && chatType !== "supergroup") {
+      return;
+    }
+
+    const entries = parseHangDuEntries_(message.text);
+    entries.forEach((entry) => {
+      rows.push([entry.serial, "", entry.groupCode]);
+    });
+  });
+
+  if (rows.length > 0) {
+    const sheet = getOrCreateDataSheet_();
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rows.length, 3).setValues(rows);
+  }
+
+  scriptProps.setProperty(TELEGRAM.LAST_UPDATE_KEY, String(maxUpdateId));
+}
+
+function parseHangDuEntries_(text) {
+  if (!text || text.toLowerCase().indexOf("hàng dư") === -1) {
+    return [];
+  }
+
+  const regex = /(\d{6})\s*-\s*(\d{1,2})/g;
+  const entries = [];
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    entries.push({
+      serial: match[1],
+      groupCode: match[2].padStart(2, "0")
+    });
+  }
+
+  return entries;
+}
+
+function getOrCreateDataSheet_() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(TELEGRAM.DATA_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(TELEGRAM.DATA_SHEET_NAME);
+    sheet.getRange(1, 1, 1, 3).setValues([["Data_6_So", "Message", "Ma_Group"]]);
+  }
+
+  return sheet;
 }
 
 function isValidPendingRow_(rowData, status) {
